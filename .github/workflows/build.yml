@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, test-quay-oidc ]
     tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
@@ -14,7 +14,7 @@ env:
 
   # Quay configuration
   QUAY_REGISTRY: quay.io
-  QUAY_IMAGE_REPO: quay.io/aipcc-cicd/claudio
+  QUAY_IMAGE_REPO: quay.io/thoughtful-code/claudio
 
 jobs:
   build-and-upload:
@@ -127,12 +127,16 @@ jobs:
         make oci-manifest-push
 
   push-quay:
-    name: Push to Quay (tag release)
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: Push to Quay (OIDC)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/test-quay-oidc'
     needs: build-and-upload
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      id-token: write
+
+    env:
+      QUAY_ROBOT_USER: thoughtful-code+github-actions-robot
 
     steps:
     - name: Checkout code
@@ -143,17 +147,28 @@ jobs:
       with:
         pattern: claudio-*
 
+    - name: Exchange OIDC token for Quay robot token
+      run: |
+        OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -r .value)
+
+        QUAY_TOKEN=$(curl -s \
+          "https://quay.io/oauth2/federation/robot/token" \
+          -u "$QUAY_ROBOT_USER:$OIDC_TOKEN" | jq -r .token)
+
+        echo "QUAY_TOKEN=$QUAY_TOKEN" >> $GITHUB_ENV
+
     - name: Log in to Quay Container Registry
       uses: docker/login-action@v4
       with:
         registry: ${{ env.QUAY_REGISTRY }}
-        username: ${{ secrets.QUAY_USERNAME }}
-        password: ${{ secrets.QUAY_PASSWORD }}
+        username: ${{ env.QUAY_ROBOT_USER }}
+        password: ${{ env.QUAY_TOKEN }}
 
     - name: Load and push images to Quay
       env:
         IMAGE_REPO: ${{ env.QUAY_IMAGE_REPO }}
-        IMAGE_TAG: ${{ github.ref_name }}
+        IMAGE_TAG: ${{ github.sha }}
       run: |
         make oci-load
         make oci-push-arch
