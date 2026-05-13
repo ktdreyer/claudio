@@ -171,6 +171,8 @@ jobs:
         IMAGE_TAG: ${{ github.sha }}
       run: |
         make oci-load
+        podman tag ${{ env.GHCR_IMAGE_REPO }}:${{ github.sha }}-amd64 ${{ env.QUAY_IMAGE_REPO }}:${{ github.sha }}-amd64
+        podman tag ${{ env.GHCR_IMAGE_REPO }}:${{ github.sha }}-arm64 ${{ env.QUAY_IMAGE_REPO }}:${{ github.sha }}-arm64
         make oci-push-arch
         make oci-manifest-build
         make oci-manifest-push
